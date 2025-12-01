@@ -1,0 +1,140 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "logicAppName": {
+      "type": "string",
+      "defaultValue": "SOCEmailAttachmentCheck"
+    },
+    "socradarApiKey": {
+      "type": "securestring"
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Logic/workflows",
+      "apiVersion": "2019-05-01",
+      "name": "[parameters('logicAppName')]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "definition": {
+          "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "actions": {
+            "Condition_Has_Attachments": {
+              "type": "If",
+              "expression": {
+                "equals": [
+                  "@triggerOutputs()?['body/HasAttachments']",
+                  true
+                ]
+              },
+              "actions": {
+                "Apply_Attachments": {
+                  "type": "Foreach",
+                  "foreach": "@triggerOutputs()?['body/Attachments']",
+                  "actions": {
+                    "If_File_Size_Allowed": {
+                      "type": "If",
+                      "expression": {
+                        "lessOrEquals": [
+                          "@items('Apply_Attachments')?['Size']",
+                          26214400
+                        ]
+                      },
+                      "actions": {
+                        "HTTP_SOCRadar": {
+                          "type": "Http",
+                          "inputs": {
+                            "method": "POST",
+                            "uri": "https://platform.socradar.com/api/threat/analysis/file",
+                            "headers": {
+                              "Api-Key": "[parameters('socradarApiKey')]",
+                              "Content-Type": "multipart/form-data"
+                            },
+                            "body": "--batch\r\nContent-Disposition: form-data; name=\"file\"; filename=\"@{items('Apply_Attachments')?['Name']}\"\r\n\r\n@{items('Apply_Attachments')?['ContentBytes']}\r\n--batch--"
+                          }
+                        },
+                        "Parse_JSON": {
+                          "type": "ParseJson",
+                          "inputs": {
+                            "content": "@body('HTTP_SOCRadar')",
+                            "schema": {
+                              "type": "object",
+                              "properties": {
+                                "AlertLevel": { "type": "number" },
+                                "Verdict": { "type": "string" },
+                                "AnalyzerMessage": { "type": "string" },
+                                "FileMD5Hash": { "type": "string" },
+                                "FileSha256Hash": { "type": "string" },
+                                "FileName": { "type": "string" }
+                              }
+                            }
+                          }
+                        },
+                        "Switch_Verdict": {
+                          "type": "Switch",
+                          "on": "@body('Parse_JSON')?['Verdict']",
+                          "cases": {
+                            "Malicious": {
+                              "actions": {
+                                "MoveToJunk": {
+                                  "type": "ApiConnection",
+                                  "inputs": {
+                                    "connectionName": "office365",
+                                    "method": "post",
+                                    "path": "/v2/Mail/Move",
+                                    "body": {
+                                      "MessageId": "@triggerOutputs()?['body/Id']",
+                                      "DestinationFolder": "Junk Email"
+                                    }
+                                  }
+                                }
+                              }
+                            },
+                            "Suspicious": {
+                              "actions": {
+                                "MoveToQuarantine": {
+                                  "type": "ApiConnection",
+                                  "inputs": {
+                                    "connectionName": "office365",
+                                    "method": "post",
+                                    "path": "/v2/Mail/Move",
+                                    "body": {
+                                      "MessageId": "@triggerOutputs()?['body/Id']",
+                                      "DestinationFolder": "Quarantine"
+                                    }
+                                  }
+                                }
+                              }
+                            },
+                            "Clean": {
+                              "actions": {}
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "triggers": {
+            "When_a_new_email_arrives": {
+              "type": "ApiConnection",
+              "inputs": {
+                "connectionName": "office365",
+                "method": "get",
+                "path": "/v2/Mail/OnNewEmail",
+                "queries": {
+                  "folderPath": "Inbox"
+                }
+              }
+            }
+          }
+        },
+        "parameters": {}
+      }
+    }
+  ]
+}
