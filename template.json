@@ -19,6 +19,23 @@
       "properties": {
         "definition": {
           "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+          "triggers": {
+            "When_a_new_email_arrives": {
+              "type": "ApiConnection",
+              "inputs": {
+                "method": "get",
+                "path": "/v2/Mail/OnNewEmail",
+                "host": {
+                  "connectionName": "office365",
+                  "operationId": "OnNewEmail",
+                  "apiId": "/providers/Microsoft.PowerApps/apis/shared_office365"
+                },
+                "queries": {
+                  "folderPath": "Inbox"
+                }
+              }
+            }
+          },
           "actions": {
             "Condition_Has_Attachments": {
               "type": "If",
@@ -73,7 +90,7 @@
                         },
                         "Switch_Verdict": {
                           "type": "Switch",
-                          "on": "@body('Parse_JSON')?['Verdict']",
+                          "expression": "@body('Parse_JSON')?['Verdict']",
                           "cases": {
                             "Malicious": {
                               "actions": {
@@ -106,28 +123,15 @@
                                   }
                                 }
                               }
-                            },
-                            "Clean": {
-                              "actions": {}
                             }
+                          },
+                          "default": {
+                            "actions": {}
                           }
                         }
                       }
                     }
                   }
-                }
-              }
-            }
-          },
-          "triggers": {
-            "When_a_new_email_arrives": {
-              "type": "ApiConnection",
-              "inputs": {
-                "connectionName": "office365",
-                "method": "get",
-                "path": "/v2/Mail/OnNewEmail",
-                "queries": {
-                  "folderPath": "Inbox"
                 }
               }
             }
